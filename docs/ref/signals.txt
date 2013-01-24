@@ -340,6 +340,22 @@ Argument        Value
 ``using``       ``"default"`` (since the default router sends writes here)
 ==============  ============================================================
 
+We can also assign directly to the relation directly::
+
+    >>> p.toppings = [t]
+
+and the :data:`m2m_handler` will receive ``"pre_remove"`` and
+``"post_remove"`` actions, if there were ``Topping`` objects to
+remove. These are followed by ``"pre_add"`` and ``"post_add"`` actions.
+
+Assigning an empty iterable::
+
+   >>> p.toppings = []
+
+will send ``"pre_clear"`` and ``"post_clear"`` actions to the
+:data:`m2m_handler`.
+
+
 class_prepared
 --------------
 

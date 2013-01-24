@@ -643,12 +643,15 @@ def create_many_related_manager(superclass, rel):
         # If the ManyToMany relation has an intermediary model,
         # the add and remove methods do not exist.
         if rel.through._meta.auto_created:
-            def add(self, *objs):
-                self._add_items(self.source_field_name, self.target_field_name, *objs)
+            def add(self, *objs, **kwargs):
+                check_duplicates = kwargs.get('check_duplicates', True)
+                self._add_items(self.source_field_name, self.target_field_name,
+                    check_duplicates, *objs)
 
                 # If this is a symmetrical m2m relation to self, add the mirror entry in the m2m table
                 if self.symmetrical:
-                    self._add_items(self.target_field_name, self.source_field_name, *objs)
+                    self._add_items(self.target_field_name, self.source_field_name,
+                        check_duplicates, *objs)
             add.alters_data = True
 
             def remove(self, *objs):
@@ -690,36 +693,39 @@ def create_many_related_manager(superclass, rel):
             return obj, created
         get_or_create.alters_data = True
 
-        def _add_items(self, source_field_name, target_field_name, *objs):
+        def _check_new_ids(self, objs):
+            from django.db.models import Model
+            new_ids = set()
+            for obj in objs:
+                if isinstance(obj, self.model):
+                    if not router.allow_relation(obj, self.instance):
+                       raise ValueError('Cannot add "%r": instance is on database "%s", value is on database "%s"' %
+                                           (obj, self.instance._state.db, obj._state.db))
+                    new_ids.add(obj.pk)
+                elif isinstance(obj, Model):
+                    raise TypeError("'%s' instance expected, got %r" % (self.model._meta.object_name, obj))
+                else:
+                    new_ids.add(obj)
+            return new_ids
+
+        def _add_items(self, source_field_name, target_field_name, check_duplicates=True, *objs):
             # source_field_name: the PK fieldname in join table for the source object
             # target_field_name: the PK fieldname in join table for the target object
             # *objs - objects to add. Either object instances, or primary keys of object instances.
-
+            # check_duplicates: Checks to avoid adding duplicate objects if True.
             # If there aren't any objects, there is nothing to do.
             from django.db.models import Model
             if objs:
-                new_ids = set()
-                for obj in objs:
-                    if isinstance(obj, self.model):
-                        if not router.allow_relation(obj, self.instance):
-                            raise ValueError('Cannot add "%r": instance is on database "%s", value is on database "%s"' %
-                                               (obj, self.instance._state.db, obj._state.db))
-                        fk_val = self._get_fk_val(obj, target_field_name)
-                        if fk_val is None:
-                            raise ValueError('Cannot add "%r": the value for field "%s" is None' %
-                                             (obj, target_field_name))
-                        new_ids.add(self._get_fk_val(obj, target_field_name))
-                    elif isinstance(obj, Model):
-                        raise TypeError("'%s' instance expected, got %r" % (self.model._meta.object_name, obj))
-                    else:
-                        new_ids.add(obj)
+                new_ids = self._check_new_ids(objs)
                 db = router.db_for_write(self.through, instance=self.instance)
-                vals = self.through._default_manager.using(db).values_list(target_field_name, flat=True)
-                vals = vals.filter(**{
-                    source_field_name: self._fk_val,
-                    '%s__in' % target_field_name: new_ids,
-                })
-                new_ids = new_ids - set(vals)
+
+                if check_duplicates:
+                    vals = self.through._default_manager.using(db).values_list(target_field_name, flat=True)
+                    vals = vals.filter(**{
+                        source_field_name: self._pk_val,
+                        '%s__in' % target_field_name: new_ids,
+                    })
+                    new_ids = new_ids - set(vals)
 
                 if self.reverse or source_field_name == self.source_field_name:
                     # Don't send the signal when we are inserting the
@@ -848,8 +854,14 @@ class ManyRelatedObjectsDescriptor(object):
             raise AttributeError("Cannot set values on a ManyToManyField which specifies an intermediary model. Use %s.%s's Manager instead." % (opts.app_label, opts.object_name))
 
         manager = self.__get__(instance)
-        manager.clear()
-        manager.add(*value)
+        if value:
+            new_ids = manager._check_new_ids(value)
+            old_ids = set(manager.values_list('pk', flat=True))
+
+            manager.remove(*(old_ids - new_ids))
+            manager.add(*(new_ids - old_ids), check_duplicates=False)
+        else:
+            manager.clear()
 
 
 class ReverseManyRelatedObjectsDescriptor(object):
@@ -905,8 +917,14 @@ class ReverseManyRelatedObjectsDescriptor(object):
             raise AttributeError("Cannot set values on a ManyToManyField which specifies an intermediary model.  Use %s.%s's Manager instead." % (opts.app_label, opts.object_name))
 
         manager = self.__get__(instance)
-        manager.clear()
-        manager.add(*value)
+        if value:
+            new_ids = manager._check_new_ids(value)
+            old_ids = set(manager.values_list('pk', flat=True))
+
+            manager.remove(*(old_ids - new_ids))
+            manager.add(*(new_ids - old_ids), check_duplicates=False)
+        else:
+            manager.clear()
 
 
 class ManyToOneRel(object):
