@@ -722,7 +722,7 @@ def create_many_related_manager(superclass, rel):
                 if check_duplicates:
                     vals = self.through._default_manager.using(db).values_list(target_field_name, flat=True)
                     vals = vals.filter(**{
-                        source_field_name: self._pk_val,
+                        source_field_name: self._fk_val,
                         '%s__in' % target_field_name: new_ids,
                     })
                     new_ids = new_ids - set(vals)
