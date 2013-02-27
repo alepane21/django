@@ -102,7 +102,7 @@ class QuerySet(object):
             len(self)
 
         if self._result_cache is None:
-            self._iter = self.iterator()
+            self._iter = self._safe_iterator(self.iterator())
             self._result_cache = []
         if self._iter:
             return self._result_iter()
@@ -337,6 +337,18 @@ class QuerySet(object):
 
             yield obj
 
+    def _safe_iterator(self, iterator):
+        # ensure result cache is cleared when iterating over a queryset
+        # raises an exception
+        try:
+            for item in iterator:
+                yield item
+        except StopIteration:
+            raise
+        except Exception:
+            self._result_cache = None
+            raise
+
     def aggregate(self, *args, **kwargs):
         """
         Returns a dictionary containing the calculations (aggregation)
@@ -530,7 +542,7 @@ class QuerySet(object):
         # Disable non-supported fields.
         del_query.query.select_for_update = False
         del_query.query.select_related = False
-        del_query.query.clear_ordering()
+        del_query.query.clear_ordering(force_empty=True)
 
         collector = Collector(using=del_query.db)
         collector.collect(del_query)
@@ -1689,7 +1701,7 @@ def prefetch_related_objects(result_cache, related_lookups):
             continue
         done_lookups.add(lookup)
 
-        # Top level, the list of objects to decorate is the the result cache
+        # Top level, the list of objects to decorate is the result cache
         # from the primary QuerySet. It won't be for deeper levels.
         obj_list = result_cache
 

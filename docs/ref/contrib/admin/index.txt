@@ -180,6 +180,11 @@ subclass::
     values defined in :attr:`ModelAdmin.readonly_fields` to be displayed as
     read-only.
 
+    The ``fields`` option, unlike :attr:`~ModelAdmin.list_display`, may only
+    contain names of fields on the model or the form specified by
+    :attr:`~ModelAdmin.form`. It may contain callables only if they are listed
+    in :attr:`~ModelAdmin.readonly_fields`.
+
     .. versionadded:: 1.4
 
     To display multiple fields on the same line, wrap those fields in their own
@@ -249,10 +254,10 @@ subclass::
             'fields': ('first_name', 'last_name', 'address', 'city', 'state'),
             }
 
-        Just like with the :attr:`~ModelAdmin.fields` option, to display
-        multiple fields on the same line, wrap those fields in their own
-        tuple. In this example, the ``first_name`` and ``last_name`` fields
-        will display on the same line::
+        As with the :attr:`~ModelAdmin.fields` option, to display multiple
+        fields on the same line, wrap those fields in their own tuple. In this
+        example, the ``first_name`` and ``last_name`` fields will display on
+        the same line::
 
             {
             'fields': (('first_name', 'last_name'), 'address', 'city', 'state'),
@@ -260,6 +265,10 @@ subclass::
 
         ``fields`` can contain values defined in
         :attr:`~ModelAdmin.readonly_fields` to be displayed as read-only.
+
+        If you add the name of a callable to ``fields``, the same rule applies
+        as with the :attr:`~ModelAdmin.fields` option: the callable must be
+        listed in :attr:`~ModelAdmin.readonly_fields`.
 
     * ``classes``
         A list containing extra CSS classes to apply to the fieldset.
@@ -451,9 +460,13 @@ subclass::
     * If the string given is a method of the model, ``ModelAdmin`` or a
       callable, Django will HTML-escape the output by default. If you'd
       rather not escape the output of the method, give the method an
-      ``allow_tags`` attribute whose value is ``True``.
+      ``allow_tags`` attribute whose value is ``True``. However, to avoid an
+      XSS vulnerability, you should use :func:`~django.utils.html.format_html`
+      to escape user-provided inputs.
 
       Here's a full example model::
+
+          from django.utils.html import format_html
 
           class Person(models.Model):
               first_name = models.CharField(max_length=50)
@@ -461,7 +474,11 @@ subclass::
               color_code = models.CharField(max_length=6)
 
               def colored_name(self):
-                  return '<span style="color: #%s;">%s %s</span>' % (self.color_code, self.first_name, self.last_name)
+                  return format_html('<span style="color: #{0};">{1} {2}</span>',
+                                     self.color_code,
+                                     self.first_name,
+                                     self.last_name)
+
               colored_name.allow_tags = True
 
           class PersonAdmin(admin.ModelAdmin):
@@ -502,12 +519,17 @@ subclass::
 
       For example::
 
+        from django.utils.html import format_html
+
         class Person(models.Model):
             first_name = models.CharField(max_length=50)
             color_code = models.CharField(max_length=6)
 
             def colored_first_name(self):
-                return '<span style="color: #%s;">%s</span>' % (self.color_code, self.first_name)
+                return format_html('<span style="color: #{0};">{1}</span>',
+                                   self.color_code,
+                                   self.first_name)
+
             colored_first_name.allow_tags = True
             colored_first_name.admin_order_field = 'first_name'
 
@@ -827,24 +849,32 @@ subclass::
     added last after all editable fields.
 
     A read-only field can not only display data from a model's field, it can
-    also display the output of a a model's method or a method of the
+    also display the output of a model's method or a method of the
     ``ModelAdmin`` class itself. This is very similar to the way
     :attr:`ModelAdmin.list_display` behaves. This provides an easy way to use
     the admin interface to provide feedback on the status of the objects being
     edited, for example::
 
+        from django.utils.html import format_html_join
+        from django.utils.safestring import mark_safe
+
         class PersonAdmin(ModelAdmin):
             readonly_fields = ('address_report',)
 
             def address_report(self, instance):
-                return ", ".join(instance.get_full_address()) or \
-                   "<span class='errors'>I can't determine this address.</span>"
+                # assuming get_full_address() returns a list of strings
+                # for each line of the address and you want to separate each
+                # line by a linebreak
+                return format_html_join(
+                    mark_safe('<br/>'),
+                    '{0}',
+                    ((line,) for line in instance.get_full_address()),
+                ) or "<span class='errors'>I can't determine this address.</span>"
 
             # short_description functions like a model field's verbose_name
             address_report.short_description = "Address"
             # in this example, we have used HTML tags in the output
             address_report.allow_tags = True
-
 
 .. attribute:: ModelAdmin.save_as
 
@@ -1074,6 +1104,13 @@ templates used by the :class:`ModelAdmin` views:
     It is expected to return a ``list`` or ``tuple`` of field names on the
     changelist that will be linked to the change view, as described in the
     :attr:`ModelAdmin.list_display_links` section.
+
+.. method:: ModelAdmin.get_fieldsets(self, request, obj=None)
+
+    The ``get_fieldsets`` method is given the ``HttpRequest`` and the ``obj``
+    being edited (or ``None`` on an add form) and is expected to return a list
+    of two-tuples, in which each two-tuple represents a ``<fieldset>`` on the
+    admin form page, as described above in the :attr:`ModelAdmin.fieldsets` section.
 
 .. method:: ModelAdmin.get_list_filter(self, request)
 
