@@ -678,3 +678,33 @@ class Simple(models.Model):
 class Choice(models.Model):
     choice = models.IntegerField(blank=True, null=True,
         choices=((1, 'Yes'), (0, 'No'), (None, 'No opinion')))
+
+
+# Models for #23329
+class ReferencedByParent(models.Model):
+    pass
+
+
+class ParentWithFK(models.Model):
+    fk = models.ForeignKey(ReferencedByParent)
+
+
+class ChildOfReferer(ParentWithFK):
+    pass
+
+
+class M2MReference(models.Model):
+    ref = models.ManyToManyField('self')
+
+# Models for #23431
+class ReferencedByInline(models.Model):
+    pass
+
+
+class InlineReference(models.Model):
+    fk = models.ForeignKey(ReferencedByInline, related_name='hidden+')
+
+
+class InlineReferer(models.Model):
+    refs = models.ManyToManyField(InlineReference)
+
