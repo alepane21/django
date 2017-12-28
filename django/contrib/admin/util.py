@@ -172,6 +172,10 @@ class NestedObjects(Collector):
         children = []
         for child in self.edges.get(obj, ()):
             children.extend(self._nested(child, seen, format_callback))
+        if obj._meta.proxy:
+            concrete_obj = obj._meta.proxy_for_model(obj.pk)
+            for child in self.edges.get(concrete_obj, ()):
+                children.extend(self._nested(child, seen, format_callback))
         if format_callback:
             ret = [format_callback(obj)]
         else:
